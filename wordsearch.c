@@ -44,6 +44,7 @@ int _ascii_check(char *input)
 			}
 			
 			input[strlen(input)-1]  =  '\0';
+			i--;
 			cnt++;
 		}
 	}
@@ -163,13 +164,13 @@ void get_words(char *inputFile)
 	Docidx *d;
 	listInfo  =  (List*)malloc(sizeof(List));	
 	listInfo->head = NULL;	
-	if((ptr = strtok(inputFile,"."))!=NULL)
-		inputFile = ptr;
 	if((ifp  =  fopen(inputFile,"r"))  == NULL)
 	{
 		printf("입력파일 읽기 실패\n");
 		return;
 	}
+	if((ptr = strtok(inputFile,"."))!=NULL)
+		docNum = atoi(ptr);
 	while(fgets(inputBuffer, sizeof(inputBuffer), ifp) !=  NULL)
 	{
 		inputBuffer[strlen(inputBuffer)-1] = '\0';
@@ -200,6 +201,15 @@ void get_words(char *inputFile)
 	return ;
 }
 
+int _input_check(char *input)
+{
+	int i;
+	for(i=0; i<strlen(input); i++){
+ 		if(!((int)input[i] < 48 || (int)input[i] > 122 || ((int)input[i] < 65 && (int)input[i] >57) || ((int)input[i] < 97 && (int)input[i] >90)))
+			return 1;
+	}
+	return -1;
+}
 /*****************************************
 입력된 검색어 문자열에서 검색 Key 추출
 쌍따옴표가 붙어있는 문자열은 AND 검색,
@@ -212,22 +222,22 @@ orKey  : OR 검색 keyword 리스트 head
 *****************************************/
 int input_command(char *input, List *andKey, List *orKey)
 {
-	char *token;
+	char *token, buf[1024];
 	int	totalAndKey = 0, totalOrKey = 0;
 	Keyvalue *ak, *akN, *ok, *okN;
 	token  =  strtok(input, " ");
 	while(token != NULL)
 	{
-		
-			if(_ascii_check(token)>0)
-				return -1;
+		sprintf(buf, token);
+		if(_input_check(buf)<0)
+			return -1;
 		/*************************
 		'"' 기호가 붙어 있을 경우
 		AND 조건 keyword로 분류
 		*************************/
-		
 		if(strchr(token,'\"')!= NULL)
 		{												/* 특수문자 제외 */
+			_ascii_check(token);	
 			akN = (Keyvalue*)malloc(sizeof(Keyvalue));
 			akN->key = (char*)malloc(sizeof(char)*strlen(token));
 			sprintf(akN->key, token);
@@ -552,7 +562,7 @@ void search_prompt(Bnode *base)
 								}
 							}
 							if(docCheck  ==  0)																				
-							{
+							{
 								if(resultDoc  ==  resultList->head)
 									resultList->head  =  resultDoc->next;
 								else
