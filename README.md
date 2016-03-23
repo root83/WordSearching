@@ -22,6 +22,8 @@
 >>structure.h : 자료 구조 헤더
 >>btree.c btree.h : B-tree 삽입, 검색, 삭제 기능 등 관련
 >>wordsearch.c wordsearch.h : 문서 역파일, 검색어 입력 및 검색, 결과 출력 등, main 함수
+>>wordsearh : 실행 바이너리 파일
+>>Makefile : 메이크파일
 
 ##제약 조건
 >>문서는 숫자와 영어 알파벳으로만 구성되어 있어야 한다.
