@@ -5,7 +5,7 @@ typedef struct _Bnode /* B-tree 노드 */
 {
 	int n;
 	struct _Bnode *ptr[MAXIMUM+1];
-	struct Bnodekey *key[MAXIMUM];
+	struct _Bnodekey *key[MAXIMUM];
 } Bnode;
 
 typedef struct _Bnodekey /* B-tree Node Key값 */
@@ -19,7 +19,7 @@ typedef struct _Keyvalue /* 색인작업 Key List */
 {
 	char *key;
 	int count;
-	struct Docidx *DocuVector;
+	struct _Docidx *DocuVector;
 	struct _Keyvalue *next;
 } Keyvalue;
 
@@ -43,4 +43,3 @@ typedef struct _Doclist
 {
 	dptr head;
 } Doclist;
-
