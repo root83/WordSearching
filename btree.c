@@ -14,8 +14,9 @@ docVector : Key가 검색된 문서 색인 정보
 
 **************************************/
 
-Bnodekey *init_Bnodekey(Bnodekey* node, char* key, int count, Docidx* docVector)
+Bnodekey *init_Bnodekey(char* key, int count, Docidx* docVector)
 {
+	Bnodekey* node;
 	if((node = (Bnodekey*)malloc(sizeof(Bnodekey))) == NULL)
 		return NULL;
 	node->key = (char*)malloc(sizeof(char)*strlen(key));
@@ -37,14 +38,14 @@ int in_Bnode(char *key, Bnode *t)
 {
 	int i;
 	Bnodekey *k;
-	for (i = 0; i < t->n; i ++)
+	for (i = 0; i < t->n; i ++)							/* 해당 노드의 형태소와 비교 */
 	{
 		k = t->key[i];
-		if (!strcmp(key,k->key)) {
+		if (!strcmp(key,k->key)) {						/* 형태소 발견 시 해당 형태소 번호 return */
 			return i;
 		}
 	}
-	return - 1;
+	return-1;
 }
 
 /************************
@@ -55,24 +56,24 @@ key  : keword
 base : B-tree의 root node
 ************************/
 
-Bnodekey *serch_btree(char *key, Bnode *base)
+Bnodekey *search_btree(char *key, Bnode *base)
 {
 	Bnode *t;
 	Bnodekey *k;
 	int i, ptr, result, loopCheck;
 	t = base->ptr[0];
-	while (t != NULL && (ptr = in_Bnode(key, t)) == - 1)
+	while (t != NULL && (ptr = in_Bnode(key, t)) == -1)							/* leaf node까지 해당 형태소가 존재하는지 검색 */
 	{
 		for (i = 0; i < t->n; i ++)
 		{
 			k = t->key[i];
 			result = strcmp(key, k->key);
-			if(result <= 0)
+			if(result <= 0)																							/* strcmp를 통해 형태소의 중간값이 될 수 있는 위치 탐색 */
 			{
 				break;
 			}
 		}
-		t = t->ptr[i];
+		t = t->ptr[i];																								/* 중간값이 되는 위치의 자식 노드 */
 	}
 	if(t == NULL)
 		return NULL;	
@@ -97,17 +98,17 @@ void insert_key(Bnode *t, Bnodekey *key, Bnode *left, Bnode *right)
 	i = t->n;
 	while (i > 0)
 	{
-		k = t->key[i - 1];
-		if(strcmp(k->key, key->key) <= 0)
+		k = t->key[i-1];
+		if(strcmp(k->key, key->key) <= 0)																			/* 해당 노드에서 형태소를 적당한 위치에 삽입 */
 			break;
-		t->key[i] = t->key[i - 1];
-		t->ptr[i + 1] = t->ptr[i];
+		t->key[i] = t->key[i-1];
+		t->ptr[i+1] = t->ptr[i];
 		i -- ;
 	}
-	t->n ++ ;
+	t->n++;
 	t->key[i] = key;
 	t->ptr[i] = left;
-	t->ptr[i + 1] = right;
+	t->ptr[i+1] = right;
 	
 }
 
@@ -129,24 +130,24 @@ Bnode *split(Bnodekey *key, Bnode *pivot, Bnode *base) /* 노드 분할 */
 	int i;
 	if ((right = (Bnode*)malloc(sizeof(Bnode))) == NULL) 
 		return NULL;
-	if (pivot == base)						/* root node를 분할할 경우 */
+	if (pivot == base)												/* root node를 분할할 경우 */
 	{
 		child = pivot->ptr[0];
 		if ((left = (Bnode*)malloc(sizeof(Bnode))) == NULL) 
 			return NULL;
-		for (i = 0; i < MINIMUM; i ++) /* 좌측 node 생성 */
+		for (i = 0; i < MINIMUM; i ++) 					/* 좌측 node 생성 */
 		{
 			left->key[i] = child->key[i];
 			left->ptr[i] = child->ptr[i];
 		}
 		left->ptr[i] = child->ptr[i];
 		left->n = MINIMUM;
-		for (i = MINIMUM + 1; i < MAXIMUM; i ++) /* 우측 node 생성 */
+		for (i = MINIMUM+1; i < MAXIMUM; i ++) /* 우측 node 생성 */
 		{
-			right->key[i - MINIMUM - 1] = child->key[i];
-			right->ptr[i - MINIMUM - 1] = child->ptr[i];
+			right->key[i-MINIMUM-1] = child->key[i];
+			right->ptr[i-MINIMUM-1] = child->ptr[i];
 		}
-		right->ptr[i - MINIMUM - 1] = child->ptr[i];
+		right->ptr[i-MINIMUM-1] = child->ptr[i];
 		right->n = MINIMUM;
 		child->n = 0; 
 		insert_key(child, child->key[MINIMUM], left, right);
@@ -161,12 +162,12 @@ Bnode *split(Bnodekey *key, Bnode *pivot, Bnode *base) /* 노드 분할 */
 		}
 		left = pivot->ptr[i];
 		left->n = MINIMUM; 									/* 좌측 node는 이미 있으므로 우측 node만 생성 */
-		for (i = MINIMUM + 1; i < MAXIMUM; i ++)
+		for (i = MINIMUM+1; i < MAXIMUM; i ++)
 		{
-			right->key[i - MINIMUM - 1] = left->key[i];
-			right->ptr[i - MINIMUM - 1] = left->ptr[i];
+			right->key[i-MINIMUM-1] = left->key[i];
+			right->ptr[i-MINIMUM-1] = left->ptr[i];
 		}
-		right->ptr[i - MINIMUM - 1] = left->ptr[i];
+		right->ptr[i-MINIMUM-1] = left->ptr[i];
 		right->n = MINIMUM;
 		insert_key(pivot, left->key[MINIMUM], left, right); /* pivot update */
 		child = pivot;
@@ -194,7 +195,7 @@ void _insert_documnet(Bnodekey *key, Bnodekey *Bk)
 		d = key->DocuVector;
 		while(d != NULL)
 		{
-			if(doc->documentNum == d->documentNum)
+			if(doc->documentNum == d->documentNum)				/* 검색된 형태소에 이미 해당 문서색인 정보가 존재할 경우 */
 			{
 				docCheck = 1;
 				break;
@@ -233,15 +234,14 @@ Bnode *insert_btree(Keyvalue *kHead, Bnode *base)
 	Keyvalue *k;
 	int i, ret, insertCheck;
 	insertCheck = 0;
-
 	k = kHead;
-	if((Bk = init_Bnodekey(Bk, k->key, k->count, k->DocuVector)) == NULL) /* 삽입할 Key 정보 초기화 */
+	if((Bk = init_Bnodekey(k->key, k->count, k->DocuVector)) == NULL) 	/* 삽입할 Key 정보 초기화 */
 	{
 		return;
 	}
 	parent = base;
 	t = base->ptr[0];
-	if (t == NULL)
+	if (t == NULL)																											/* 노드의 자식 노드가 존재하지 않을 때 자식노드 생성 */
 	{
 		if ((t = (Bnode*)malloc(sizeof(Bnode))) == NULL)
 		{
@@ -251,14 +251,14 @@ Bnode *insert_btree(Keyvalue *kHead, Bnode *base)
 		t->ptr[0] = NULL;
 		base->ptr[0] = t;
 	}
-	while (t != NULL)
+	while (t != NULL)																										/* root 노드로 부터 형태소가 삽입될 수 있는 leaf 노드를 탐색 */
 	{
-		if ((ret = in_Bnode(Bk->key, t)) >= 0) { /* 동일한 key가 존재할 경우 */
+		if ((ret = in_Bnode(Bk->key, t)) >= 0) { 													/* 동일한 형태소가 존재할 경우 */
 			
-			_insert_documnet(t->key[ret], Bk);
-			return parent; 
+			_insert_documnet(t->key[ret], Bk);															/* 해당 형태소에 문서 색인 정보 추가 */
+			return parent;
 		}
-		if (t->n == MAXIMUM)    /* 해당 node에 key가 최대값만큼 저장된 경우 분할 */
+		if (t->n == MAXIMUM)    																					/* 해당 node에 key가 최대값만큼 저장된 경우 분할 */
 		{
 			t = split(Bk, parent, base);
 			if (t == NULL) {
@@ -266,17 +266,17 @@ Bnode *insert_btree(Keyvalue *kHead, Bnode *base)
 			}
 		}
 		parent = t;
-		for (i = 0; i < t->n ; i ++)
+		for (i = 0; i < t->n ; i ++)																			/* 해당 노드에 저장된 형태소 갯수 만큼 */
 		{
 			tk = t->key[i];
-			if(strcmp(Bk->key, tk->key) < 0) /* 알파벳 기준으로 key를 저장할 리프node를 탐색 */
+			if(strcmp(Bk->key, tk->key) < 0) 																/* 알파벳 기준으로 형태소를 저장할 leaf 노드를 탐색 */
 			{
 				break;
 			}
 		}
 		t = t->ptr[i];
 	}
-	insert_key(parent, Bk, NULL, NULL);		/* 찾은 노드에 키 삽입 */
+	insert_key(parent, Bk, NULL, NULL);																	/* 대상 노드에 키 삽입 */
 	
 	return parent;
 }
@@ -326,7 +326,7 @@ void _list(Bnode *t)
 			k = t->key[i];
 			printf("%s ", k->key);
 		}
-		for (i = 0; i < t->n + 1; i ++)
+		for (i = 0; i < t->n+1; i ++)
 {
 			printf("ptr[%d]\t",i);
 			_list(t->ptr[i]);
@@ -339,4 +339,5 @@ void list_btree(Bnode *base)
 {
 	_list(base->ptr[0]);
 }
+
 
