@@ -12,6 +12,6 @@ int _insert_document(Doclist *listDoc, Docidx *inputDoc);
 int _delete_document(Doclist *listDoc, Docidx *inputDoc);
 void _or_search(List* inputList, Doclist* resultList, Bnode *base);
 int _and_search(List* inputList, Doclist* resultList, Bnode *base);
-void search_prompt(Bnode *base);
+void search_prompt(char *inputFileName,Bnode *base);
 void main(int argc, char *argv[]);
 

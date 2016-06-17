@@ -16,7 +16,7 @@ docVector : Key가 검색된 문서 색인 정보
 
 Bnodekey *init_Bnodekey(char* key, int count, Docidx* docVector)
 {
-	Bnodekey* node;
+	Bnodekey *node;
 	if((node = (Bnodekey*)malloc(sizeof(Bnodekey))) == NULL)
 		return NULL;
 	node->key = (char*)malloc(sizeof(char)*strlen(key));
@@ -235,8 +235,7 @@ Bnode *insert_btree(Keyvalue *kHead, Bnode *base)
 	int i, ret, insertCheck;
 	insertCheck = 0;
 	k = kHead;
-	if((Bk = init_Bnodekey(k->key, k->count, k->DocuVector)) == NULL) 	/* 삽입할 Key 정보 초기화 */
-	{
+	if((Bk = init_Bnodekey(k->key, k->count, k->DocuVector))==NULL){
 		return;
 	}
 	parent = base;
@@ -255,7 +254,7 @@ Bnode *insert_btree(Keyvalue *kHead, Bnode *base)
 	{
 		if ((ret = in_Bnode(Bk->key, t)) >= 0) { 													/* 동일한 형태소가 존재할 경우 */
 			
-			_insert_documnet(t->key[ret], Bk);															/* 해당 형태소에 문서 색인 정보 추가 */
+//			_insert_documnet(t->key[ret], Bk);															/* 해당 형태소에 문서 색인 정보 추가 */
 			return parent;
 		}
 		if (t->n == MAXIMUM)    																					/* 해당 node에 key가 최대값만큼 저장된 경우 분할 */
@@ -313,7 +312,7 @@ B-tree 출력
 
 void _list(Bnode *t)
 {
-	int i;
+	int i,j;
 	static int x = 0;
 	Bnodekey *k;
 	if (t != NULL)
@@ -327,7 +326,7 @@ void _list(Bnode *t)
 			printf("%s ", k->key);
 		}
 		for (i = 0; i < t->n+1; i ++)
-{
+		{
 			printf("ptr[%d]\t",i);
 			_list(t->ptr[i]);
 		}
@@ -338,6 +337,41 @@ void _list(Bnode *t)
 void list_btree(Bnode *base)
 {
 	_list(base->ptr[0]);
+}
+
+void _write_list(Bnode *t, char *fileName)
+{
+	FILE *fp;
+	int i,j;
+	static int x = 0;
+	Bnodekey *k;
+	Docidx *d;
+	if (t != NULL)
+	{
+		x += 2;
+		fp=fopen(fileName,"a+");
+		for (i = 0; i < t->n; i ++) {
+			k = t->key[i];
+			fprintf(fp, "%s ",k->key);
+			d=k->DocuVector;
+			while(d!=NULL){
+				fprintf(fp, "%d ",d->documentNum);
+				d=d->next;
+			}
+			fprintf(fp, "\n");
+		}
+		fclose(fp);
+		for (i = 0; i < t->n+1; i ++)
+		{
+			_write_list(t->ptr[i], fileName);
+		}
+		x -= 2;
+	}
+}
+
+void write_btree(Bnode *base, char *fileName)
+{
+	_write_list(base->ptr[0], fileName);
 }
 
 

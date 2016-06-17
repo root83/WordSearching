@@ -9,4 +9,7 @@ void _delete(Bnode *t);
 Bnode *delete_btree(Bnode *base);
 void _list(Bnode *t);
 void list_btree(Bnode *base);
+void _write_list(Bnode *t, char *fileName);
+void write_btree(Bnode *base, char *fileName);
+
 

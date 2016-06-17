@@ -9,21 +9,39 @@ source 파일 정보
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <time.h>
 #include "structure.h"
 #include "wordsearch.h"
 #include "btree.h"
-
+#include <sys/shm.h>
+
+#define	MEM_SIZE	104800
+
+char input_index[13][2] = {"aq", "bn", "cz", "dv", "eg", "fo", "hl", "iw", "jm", "kt", "py", "ru", "sx"};
+
+int KEY_NUM;
+
+int word_cnt=0;
+int btree_word_cnt=0;
+
+
 Bnode *head;
+int input_idx;
+int shm_key;
+
 
 /**************
 초기화
 **************/
-void init()
+Bnode* init_head()
 {
-	int i;
+	Bnode *head;
 	head = (Bnode*)malloc(sizeof(Bnode));
 	head->ptr[0] = NULL;
 	head->n = 0;
+	return head;
 }
 
 /*****************
@@ -52,6 +70,62 @@ Keyvalue *init_key(char *keyword, Docidx *doc){
 	return key;
 }
 
+
+
+int IsSpaceWork(unsigned char ch)
+{
+	if(ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
+		return 1;
+	return 0;
+}
+
+int StrLRTrimWork(char *pszString)
+{
+	int len = 0;
+	if( pszString && *pszString )
+	{
+		register char * pszStart = pszString;
+		register char * pszEnd = pszString;
+		register char *pszFirstNonSpace = NULL;
+		register short int	 bAllSpace = 1;
+
+		while( *pszEnd )
+		{
+			if( bAllSpace && !IsSpaceWork( *pszEnd ) )
+			{
+				pszFirstNonSpace = pszEnd;
+				bAllSpace = 0;
+			}
+			pszEnd++;
+		}
+
+		if( bAllSpace )
+		{
+			*pszString = '\0';
+			return 0;
+		}
+		else
+		{
+			pszEnd--;
+
+			while( ( IsSpaceWork( *pszEnd ) ) && pszEnd >= pszString )
+			{
+				*pszEnd-- = '\0';
+			}
+			if(pszFirstNonSpace)
+			{
+				while( (*pszStart++ = *pszFirstNonSpace++) != NULL );
+				len = pszStart - pszString - 1;
+			}
+			else
+			{
+				len = pszEnd - pszString + 1;
+			}
+		}
+	}
+	return len;
+}
+
 /********************
 알파벳, 숫자를 제외한
 특수문자 제거
@@ -62,8 +136,15 @@ int _ascii_check(char *input)
 	int i, j, cnt=0;
 	for(i = 0; i < strlen(input); i++)
 	{
-		if((int)input[i] < 48 || (int)input[i] > 122 || ((int)input[i] < 65 && (int)input[i] >57) || ((int)input[i] < 97 && (int)input[i] >90))
+		if((int)input[i]>64 && (int)input[i]<91){
+			cnt++;
+			input[i] = (int)input[i]+32;
+		}
+		else if((int)input[i]>96 &&(int)input[i]<123)
+			cnt++;
+		else if((int)input[i] < 48 || (int)input[i] > 122 || ((int)input[i] < 65 && (int)input[i] >57) || ((int)input[i] < 97 && (int)input[i] >90))
 		{
+/*
 			for(j = i; j < strlen(input)-1; j++)
 			{
 				input[j] = input[j+1];
@@ -71,12 +152,15 @@ int _ascii_check(char *input)
 			
 			input[strlen(input)-1] = '\0';
 			i--;
-			cnt++;
+*/			
+			input[i]=' ';
 		}
 	}
+	StrLRTrimWork(input);
+	if((int)input[0]>47 && (int)input[0]<58)
+		cnt=0;
 	return cnt;
 }
-
 
 /******************************************
 입력된 문자열에서 Keyword 추출
@@ -88,17 +172,19 @@ listInfo		: B-tree 삽입 전 Key 정보 리스트
 
 void _get_keylist(char *inputString, int docNum, List *listInfo)
 {
-	char *token;
-	int i, j, keyCheck, docCheck;
+	char *token, tempBuf[1024];
+	FILE *fp, *logFile;
+	int i, j, keyCheck, docCheck,l=0;
 	Keyvalue *k;													// Key List 처리를 위한 Temp Keyvalue
 	Keyvalue *key;												// 신규 Key 삽입을 위한 Buffer Docidx
 	Docidx *d;														// Document Vector List 처리를 위한 temp Docidx
 	Docidx *doc;													// 신규 Document Vector 삽입을 위한 Buffer Docidx
+	_ascii_check(inputString);										/* 특수문자 제거 */
+	StrLRTrimWork(inputString);
 	token = strtok(inputString, " ");  		// 입력값에 대하여 공백을 기준으로 형태소를 추출
 	while(token !=  NULL)
 	{
-		_ascii_check(token);										/* 특수문자 제거 */
-
+		if(_ascii_check(token)>0){
 		keyCheck = 0; 
 		k = listInfo->head;
 		while(k!= NULL)													/* 추출된 기존 형태소 리스트와 비교 */
@@ -150,43 +236,109 @@ void _get_keylist(char *inputString, int docNum, List *listInfo)
 					k = k->next;
 				k->next = key;
 			}			
+			word_cnt++;;
 		}
+		}
+		l++;
 		token = strtok(NULL," ");
 	}
 }
 
-/***************************
-입력된 파일에서 key값을 추출
-파일명이 문서색인 번호
-***************************/
 
-void get_words(char *inputFile, Bnode *base)
+void _get_keylist_index(char *inputString, Docidx *doc, List *listInfo)
 {
-	FILE *ifp;										// 입력 파일 포인터
-	char inputBuffer[8192], *ptr;
+	char *token;
+	int i, j, keyCheck, docCheck;
+	Keyvalue *k;													// Key List 처리를 위한 Temp Keyvalue
+	Keyvalue *key;												// 신규 Key 삽입을 위한 Buffer Docidx
+	Docidx *d;														// Document Vector List 처리를 위한 temp Docidx
+
+
+	keyCheck = 0; 
+	k = listInfo->head;
+	while(k!= NULL)													/* 추출된 기존 형태소 리스트와 비교 */
+	{
+		if(!strcmp(k->key, inputString))						/* 추출된 동일한 형태소가 존재하는 경우 */
+		{
+			d = k->DocuVector;
+			docCheck = 0;
+			while(d!= NULL)											/* 추출된 형태소의 Document vector와 비교 */
+			{
+				if(d->documentNum  ==  doc->documentNum)		/* 동일한 문서에 대해서 추출된 형태소 일 경우 */
+				{
+					docCheck = 1;
+					break;
+				}
+				d = d->next;
+			}
+
+			if(docCheck  ==  0)									/* 추출된 형태소에 대해 신규 문서 색인 정보 삽입 */
+			{
+				d = k->DocuVector;
+				for(j = 0;d->next!= NULL; j++)
+					d = d->next;
+					
+				d->next = doc;
+			}
+			k->count++;													/* 형태소 검출 횟수 증가 */
+			keyCheck = 1;
+			break;
+		}
+		k = k->next;
+	}
+
+	if(keyCheck  ==  0)											/* 신규 검출 형태소 등록 */
+	{
+		key = init_key(inputString, doc);
+
+		if(listInfo->head == NULL )
+		{
+			listInfo->head = key;
+		}
+
+		else
+		{
+			k = listInfo->head;
+			for(i = 0; k->next!= NULL; i++)
+				k = k->next;
+			k->next = key;
+		}			
+	}
+
+}
+
+void get_words_file(char *inputFile, Bnode *base)
+{
+	char inputBuffer[999999], *ptr, getBuffer[999999], tempBuf[999999], tempBuf2[999999], logFileName[1024];;
 	int	i,j,docNum;
 	Keyvalue *k, *tempK;					// Keyword 처리 및 메모리 free buffer
-	Docidx *d;										// Document 정보 처리 buffer
+	Docidx *d, *doc;										// Document 정보 처리 buffer
 	List* listInfo;								// Keyword 리스트
-	
+	FILE *ifp;
 	
 	listInfo = (List*)malloc(sizeof(List));	
 	listInfo->head = NULL;	
-	
 	if((ifp = fopen(inputFile,"r"))  == NULL)
 	{
+		
 		printf("입력파일 읽기 실패\n");
 		return;
 	}
-	
-	if((ptr = strtok(inputFile,"."))!=NULL)										/* 파일명에서 확장자 제거 */
-		docNum = atoi(ptr);
-		
+
 	while(fgets(inputBuffer, sizeof(inputBuffer), ifp) !=  NULL)
 	{
-		inputBuffer[strlen(inputBuffer)-1] = '\0';
-		
-		_get_keylist(inputBuffer, docNum, listInfo);						/* 파일에서 행단위 값에 대해 Keyword 검출 */
+		sprintf(tempBuf,inputBuffer);
+		ptr = strtok(tempBuf," ");
+		sprintf(getBuffer, ptr);
+		while((ptr=strtok(NULL," "))!=NULL){
+			sprintf(tempBuf2, ptr);
+			StrLRTrimWork(tempBuf2);
+			if(strlen(tempBuf2)>0){
+				docNum=atoi(tempBuf2);
+				doc=init_doc(docNum, 0);
+				_get_keylist_index(getBuffer, doc, listInfo);						/* 파일에서 행단위 값에 대해 Keyword 검출 */
+			}
+		}
 	}
 	fclose(ifp);
 
@@ -208,6 +360,84 @@ void get_words(char *inputFile, Bnode *base)
 	listInfo->head = NULL;
 	free(listInfo);
 	return ;
+}
+
+
+/***************************
+입력된 파일에서 key값을 추출
+파일명이 문서색인 번호
+***************************/
+
+void get_words(char *inputFile, Bnode *base)
+{
+	char inputBuffer[1048576], *ptr, getBuffer[1048576], tempBuf[1048576], tempBuf2[1048576];
+	int	i,j,docNum, ret;
+	Keyvalue *k, *tempK;					// Keyword 처리 및 메모리 free buffer
+	Docidx *d;										// Document 정보 처리 buffer
+	List* listInfo;								// Keyword 리스트
+	FILE *lfp, *ifp;
+
+	listInfo = (List*)malloc(sizeof(List));	
+	listInfo->head = NULL;
+	if((ifp = fopen(inputFile,"r"))  == NULL)
+	{
+		printf("입력파일 읽기 실패\n");
+		return;
+	}
+		
+
+//	if((ptr = strtok(inputFile,","))!=NULL)										/* 파일명에서 확장자 제거 */
+//		docNum = atoi(ptr);
+
+		
+	while(fgets(inputBuffer, sizeof(inputBuffer), ifp) !=  NULL)
+	{
+		inputBuffer[strlen(inputBuffer)] = '\0';
+		strcpy(tempBuf,inputBuffer);
+		if(strstr(tempBuf,"INSERT")!=NULL){
+			ptr=strtok(tempBuf,"(");
+			ptr=strtok(NULL,",");
+		}
+		else{
+			for(i=0;i<strlen(tempBuf)-1;i++){
+				tempBuf[i]=tempBuf[i+1];
+			}
+			ptr=strtok(tempBuf,",");
+		}
+
+		docNum=atoi(ptr);
+		if(docNum==0)
+			continue;
+		ptr=strtok(NULL,",");
+		ptr=strtok(NULL,",");
+		sprintf(getBuffer,"");
+		while((ptr=strtok(NULL,")"))!=NULL){
+			sprintf(tempBuf2,ptr);
+			_ascii_check(tempBuf2);										/* 특수문자 제거 */
+			strcat(getBuffer,tempBuf2);
+		}
+		getBuffer[strlen(getBuffer)] = '\0';
+
+		_get_keylist(getBuffer, docNum, listInfo);						/* 파일에서 행단위 값에 대해 Keyword 검출 */
+
+	}
+	fclose(ifp);
+	k = listInfo->head;
+	while(k!= NULL)
+	{
+		ret = insert_btree(k, base);   									/* 추출된 key값 및 색인 정보를 B-tree에 삽입 */
+		if(ret<0){
+			sprintf(tempBuf,"/wndi/temp/btree_fail.log");
+		}
+        else if(ret==0){
+            sprintf(tempBuf,"/wndi/temp/btree_succ.log");
+			btree_word_cnt++;;
+        }
+
+		k = k->next;
+	}
+
+	return base;
 }
 
 /********************
@@ -251,6 +481,7 @@ int input_command(char *input, List *andKey, List *orKey)
 		if(strchr(token,'\"')!= NULL)
 		{												
 			_ascii_check(token);							/* 특수문자 제외 */
+			StrLRTrimWork(token);
 			akN = init_key(token, NULL);
 
 			if(andKey->head == NULL)					/* 먼저 입력된 AND 검색 검색어가 없을 경우 검색어 정보 추가 */
@@ -356,6 +587,77 @@ Doclist *_sort_list(Doclist *base)
 }
 
 
+Doclist *_sort_list_all(List *base)
+{
+    List *returnList;                                                        /* return할 List */
+    Docidx *a;
+    Docidx *doc, *tmp, *tmp2;
+	Doclist *dList;
+	Keyvalue *k, *key, *keyR;
+    returnList = (List*)malloc(sizeof(List));
+    returnList->head = NULL;
+	dList = (Doclist*)malloc(sizeof(Doclist));
+	dList->head = NULL;
+	k = base->head;
+	while(k!=NULL){
+    	a = k->DocuVector;
+    	while(a !=  NULL)
+    	{
+	        doc = init_doc(a->documentNum, a->termFreq);
+	    	if(dList->head == NULL)                                    /* 첫 문서 색인 정보 */
+	    	{
+	        	dList->head = doc;
+	    	}
+	       else
+	       {
+           		tmp = dList->head;
+           		if(tmp->termFreq < doc->termFreq)                       /* 리스트 Head 문서색인의 검색빈도가 더 낮을 경우 head 교체 */
+           		{
+               		doc->next  = tmp;
+               		dList->head = doc;
+           		}
+           		else
+   	       		{
+               		while(tmp!= NULL)
+               		{
+                   		if(tmp->termFreq >=  doc->termFreq)
+                       	{
+                       		if(tmp->next == NULL)                                   /* 리스트의 마지막에 문서색인 정보 삽입 */
+                       		{
+                           		tmp->next = doc;
+                           		break;
+                       		}
+   	               		}
+                   		else
+	                   	{
+                      		doc->next = tmp;                                            /* 리스트의 적당한 위치에 문서 색인 정보 삽입 */
+                       		tmp2->next = doc;
+                       		break;
+   	               		}
+       	           		tmp2 = tmp;
+           	       		tmp = tmp->next;
+					}
+           		}
+    	    }
+        	a = a->next;
+    	}
+		key = init_key(k->key, dList->head);
+		if(returnList->head==NULL){
+			returnList->head = key;
+		}
+		else{
+			keyR=returnList->head;
+			while(keyR->next!=NULL)
+				keyR=keyR->next;
+			keyR->next=key;
+		}
+	
+		k=k->next;
+	}
+    return returnList;
+
+}
+
 /**************************************
 문서 색인 정보 리스트에서
 문서 색인 정보 찾기
@@ -378,6 +680,20 @@ Docidx *_search_document(Doclist *listDoc, Docidx *inputDoc)
 	}
 	return NULL;
 }
+Docidx *_search_document_all(Doclist *listDoc, Docidx *inputDoc)
+{
+    Docidx *d;
+    d = listDoc->head;
+    while(d!= NULL)
+    {
+        if(d->documentNum  ==  inputDoc->documentNum)
+        {
+            return d;
+        }
+        d = d->next;
+    }
+    return NULL;
+}
 
 
 /**************************************
@@ -389,6 +705,25 @@ inputDoc : 삽입할 문서색인 정보
 **************************************/
 
 int _insert_document(Doclist *listDoc, Docidx *inputDoc)
+{
+    Docidx *d;
+    Docidx *doc;
+    doc = init_doc(inputDoc->documentNum, 1);
+    if(listDoc->head == NULL){
+        listDoc->head = doc;
+    }
+    else{
+        d = listDoc->head;
+        while(d->next != NULL)
+        {
+            d = d->next;
+        }
+        d->next = doc;
+    }
+    return 0;
+}
+
+int _insert_document_all(Doclist *listDoc, Docidx *inputDoc)
 {
 	Docidx *d;
 	Docidx *doc;
@@ -467,6 +802,50 @@ void _or_search(List* inputList, Doclist* resultList, Bnode *base)
 		key =  key->next;
 	}
 	
+}
+void _search_all(List* inputList, List* resultList, Bnode *base)
+{
+    Keyvalue *key, *keyResult, *k;
+    Bnodekey *keyR; // keyword 검색 결과 저장
+    Docidx *d, *doc;
+	Doclist *kdList;
+	int chk;
+
+    key = inputList->head;
+	kdList = (Doclist*) malloc(sizeof(Doclist));
+
+    while(key!= NULL)
+    {
+		printf("key : %s \n", key->key);
+        if((keyR = search_btree(key->key, base))!= NULL)                    /* B-tree에서 Keyword 검색 */
+        {
+			keyResult = resultList->head;
+			chk=0;
+			while(keyResult != NULL){
+				if(!strcmp(keyResult->key, keyR->key)){
+					chk=1;
+					break;
+				}
+				keyResult = keyResult->next;
+            }
+			if(chk==0){
+				k = init_key(key->key, keyR->DocuVector);
+				printf("insert key : %s\n", key->key);
+            	if(resultList->head == NULL )
+            	{
+                	resultList->head = k;
+            	}
+            	else
+            	{
+                	keyResult = resultList->head;
+                	while(keyResult->next!= NULL)
+                    	keyResult = keyResult->next;
+                	keyResult->next = k;
+	            }
+			}
+        }
+        key =  key->next;
+    }
 }
 
 /*********************************************
@@ -571,142 +950,221 @@ int _and_search(List* inputList, Doclist* resultList, Bnode *base)
 검색어를 입력받고 B-tree에서 key를 검색하여
 결과를 출력
 ******************************************/
-void search_prompt(Bnode *base)
+void search_index(char *inputBuffer, Bnode *base)
 {
-	char keyword[1024];
-	int i, docCheck, ret;
-	int andCheck;					
+    char keyword[1024], tempBuf[1024], resultSet[1000000];
+    int i, docCheck, ret, index, count;
+    int andCheck;
+	int	shm_id;
+	void *shm_addr;
+    FILE *ifp;
+	char *ptr_1;
 
 
-	Docidx *d;
-	Docidx *resultDoc, *tempD; 
-	Keyvalue *k, *tempK;
-	List *inputKeyAndList, *inputKeyOrList;
-	Doclist *resultList;
+    Docidx *d;
+    Docidx *resultDoc, *tempD;
+    Keyvalue *k, *tempK, *key;
+    List *inputKeyAndList, *inputKeyOrList;
+    Doclist *resultList;
+
+    List *resultOrList, *resultAndList;
+	if((ptr_1=strtok(inputBuffer,"["))==NULL)
+		return -1;
+	sprintf(keyword,ptr_1);
 
 
+	inputKeyAndList = (List*)malloc(sizeof(List));
+	inputKeyAndList->head = NULL;
+	inputKeyOrList = (List*)malloc(sizeof(List));
+	inputKeyOrList->head = NULL;
+	resultList = (Doclist*)malloc(sizeof(Doclist));
+	resultList->head = NULL;
+	resultOrList = (List*)malloc(sizeof(List));
+	resultOrList->head = NULL;
+	resultAndList = (List*)malloc(sizeof(List));
+	resultAndList->head = NULL;
+	andCheck = 0;
+	sprintf(resultSet,"");
 	
-	while (1)
+	if((ret = input_command(keyword, inputKeyAndList, inputKeyOrList))>0) /* 입력된 문장을 AND, OR 검색 조건에 맞춰 리스트 저장 */
 	{
-		printf("\n검색할 키워드를 입력하세요 (종료시 q!)->");
-		
-		gets(keyword);
-		if(strstr(keyword,"q!")!= NULL)																				/* "q!" 입력시 loop 종료 */
-			break;
+		/************************
+		OR 조건 검색 keyword 처리
+		************************/
+		if(inputKeyOrList->head !=NULL)
+			_search_all(inputKeyOrList, resultOrList, base);
 
-		inputKeyAndList = (List*)malloc(sizeof(List));	
-		inputKeyAndList->head = NULL;	
-		inputKeyOrList = (List*)malloc(sizeof(List));	
-		inputKeyOrList->head = NULL;
-		resultList = (Doclist*)malloc(sizeof(Doclist));
-		resultList->head = NULL;
-		andCheck = 0;
-		
-		
-		if((ret = input_command(keyword, inputKeyAndList, inputKeyOrList))>0) /* 입력된 문장을 AND, OR 검색 조건에 맞춰 리스트 저장 */
+
+		/*************************
+		AND 조건 검색 keyword 처리
+		*************************/
+		if(inputKeyAndList->head !=NULL)
+			_search_all(inputKeyAndList, resultAndList, base);
+		if(resultOrList->head == NULL && resultAndList == NULL)
 		{
-			k = inputKeyOrList->head;
-			printf("OR key :\n");
-			while(k != NULL)																										/* OR 검색조건 검색어 List 출력 */
-			{
-				printf("\t%s", k->key);
-				k = k->next;
-			}
-			printf("\n");
-			k = inputKeyAndList->head;
-			printf("AND key :\n");																								/* AND 검색조건 검색어 List 출력 */
-			while(k != NULL)
-			{
-				printf("\n%s", k->key);
-				k = k->next;
-			}
-			printf("\n");
-			
-			/************************ 
-			OR 조건 검색 keyword 처리
-			************************/
-			if(inputKeyOrList->head !=NULL)
-				_or_search(inputKeyOrList, resultList, base);												/* OR 조건 검색어부터 검색 */
-			
-
-			/************************* 
-			AND 조건 검색 keyword 처리
-			*************************/
-			if(inputKeyAndList->head !=NULL)
-				andCheck = _and_search(inputKeyAndList, resultList, base);					/* AND 조건 검색어 검색 */
-																																						/* andCheck = 1 일 경우 AND 검색 조건에 의해 모든 결과가 무효 */
-																																						/* 해당 경우에 대해 따로 처리하기 위해 삽입하였으나 기능 미구현. */
-			
-			if(resultList->head == NULL || andCheck == 1)
-			{
-				printf("검색 결과가 없습니다\n");
-			}
-			else
-			{
-				resultList = _sort_list(resultList);																/* 검색 결과를 문서 내에서 가장 많은 검색으롤 포함한 순으로 정렬 */
-				printf("문서 위치/문서 포함 키워드 수 : ");
-				resultDoc = resultList->head;
-				while(resultDoc!= NULL)
-				{
-					printf("%d/%d\t", resultDoc->documentNum, resultDoc->termFreq);
-					resultDoc = resultDoc->next;
-				}
-				printf("\n");
-			}
-
-		}
-		else if(ret < 0)
-		{
-			printf("검색어를 다시 입력해주세요.\n");
 		}
 		else
 		{
-			printf("입력된 검색어가 없습니다.\n");
+			count=0;
+			k = inputKeyOrList->head;
+			while(k!=NULL){
+				key = resultOrList->head;
+				i=0;
+				while(key!=NULL){
+					if(!strcmp(k->key, key->key)){
+						
+						sprintf(tempBuf,"%s/OR", key->key);
+						strcat(resultSet,tempBuf);
+						resultDoc = key->DocuVector;
+						while(resultDoc!= NULL)
+						{
+							sprintf(tempBuf,"\t%d", resultDoc->documentNum);
+							strcat(resultSet, tempBuf);
+							resultDoc = resultDoc->next;
+						}
+						strcat(resultSet, "\n");
+						i=1;
+						break;
+					}
+					key = key->next;
+				}
+				if(i==0){
+					sprintf(tempBuf, "%s/OR\n", k->key);
+					strcat(resultSet, tempBuf);
+				}
+				k=k->next;
+			}
+			i=0;
+			k = inputKeyAndList->head;
+			while(k!=NULL){
+				key = resultAndList->head;
+				i=0;
+				while(key!=NULL){
+					if(!strcmp(k->key, key->key)){
+						resultDoc = key->DocuVector;
+						sprintf(tempBuf,"%s/AND",  key->key);
+						strcat(resultSet,tempBuf);
+						while(resultDoc!= NULL)
+						{
+							sprintf(tempBuf,"\t%d", resultDoc->documentNum);
+							resultDoc = resultDoc->next;
+							strcat(resultSet, tempBuf);
+						}
+						strcat(resultSet, "\n");
+						i=1;
+						break;
+					}
+					key = key->next;
+				}
+				if(i==0){
+					sprintf(tempBuf, "%s/AND\n", k->key);
+					strcat(resultSet, tempBuf);
+				}
+				k=k->next;
+			}
+			strcat(resultSet,"\n");
 		}
-	
-		/*************
-			List Free
-		*************/
-		k = inputKeyAndList->head;
-		while(k!= NULL)
-		{
-			tempK = k;		k = k->next;		free(tempK);
-		}
-		k = inputKeyOrList->head;
-		while(k!= NULL)
-		{
-			tempK = k;		k = k->next;		free(tempK);
-		}
-		resultDoc = resultList->head;
-		while(resultDoc!= NULL)
-		{
-			d = resultDoc;		resultDoc = resultDoc->next;		free(d);
-		}
-	}	
-}
+	}
+	else if(ret < 0)
+	{
+		;
+	}
+	else
+	{
+		;
+	}
+	if((shm_id = shmget( (key_t)KEY_NUM, MEM_SIZE, IPC_CREAT|0666)) == -1){
+		return -1;
+	}
+	if( ( shm_addr = shmat( shm_id, ( void *)0, 0)) == (void *)-1){
+		return -1;
+	}
+	sprintf( (char *)shm_addr, "%s[output]", resultSet); 
+	shmdt( shm_addr);
 
+	/*************
+		List Free
+	*************/
+	k = inputKeyAndList->head;
+	while(k!= NULL)
+	{
+		tempK = k;      k = k->next;        free(tempK);
+	}
+	k = inputKeyOrList->head;
+	while(k!= NULL)
+	{
+		tempK = k;      k = k->next;        free(tempK);
+	}
+	resultDoc = resultList->head;
+	while(resultDoc!= NULL)
+	{
+		d = resultDoc;      resultDoc = resultDoc->next;        free(d);
+	}
+}
 
 void main(int argc, char *argv[])
 {
-	char input[1024] ;
-	init();
-	while(1)
+	char input[1024], tempBuf[1024], tmpBuf[1024], inputBuffer[1024];
+	FILE *fp, *lfp;
+	int i, j,  pid, k, check=0 ;
+	DIR *dirp;
+	struct dirent *dp;
+
+	int   shm_id;
+	void *shm_addr;
+
+	input_idx = atoi(argv[1]);
+	shm_key = atoi(argv[2]);
+
+    pid = 0;
+    if((pid = fork()) < 0) {
+        exit(0);
+    }
+    else if(pid != 0) {
+        exit(0);
+    }
+    setsid();
+	KEY_NUM = 150+(shm_key*13 + input_idx);
+	
+	
+    head = init_head();
+	sprintf(tempBuf,"/wndi/temp/index_final/%c", input_index[input_idx][0]);
+    get_words_file(tempBuf, head);
+	sprintf(tempBuf,"/wndi/temp/index_final/%c", input_index[input_idx][1]);
+    get_words_file(tempBuf, head);
+	if ( ( shm_id = shmget( (key_t)KEY_NUM, MEM_SIZE, IPC_CREAT|0666)) == -1 )
 	{
-		printf("문서 번호 파일을 입력하세요.(종료 : q!, 검색 : s!)");
-		gets(input);
-		if(strstr(input,"s!")!= NULL)
-			break;
-		else if(strstr(input,"q!")!= NULL)
-		{
-			exit(0);
-		}
-		get_words(input, head);													/* 입력된 파일에 대하여 역파일 처리 */
+		printf( "공유 메모리 생성 실패\n");
+	   return -1;
 	}
-	
-	search_prompt(head);												/* 검색어 입력모드로 전환 */
-	
-	delete_btree(head);                           /* B-tree 삭제 */
-	free(head);
+
+	if (( shm_addr = shmat( shm_id, ( void *)0, 0)) == ( void *)-1 )
+	{
+		   printf( "공유 메모리 첨부 실패\n");
+		   return -1;
+	}
+	sprintf((char *)shm_addr, "[ready]");
+    while(1){
+		if(strlen((char *)shm_addr)>0 && strstr((char *)shm_addr,"[quit]")!=NULL)
+		{		
+			break;
+
+		}
+		if(strlen((char *)shm_addr)>0 && strstr((char *)shm_addr,"[input]")!=NULL){
+			sprintf(inputBuffer, (char *)shm_addr);
+			sprintf((char *)shm_addr,"");
+
+            search_index(inputBuffer, head);                                              /* 검색어 입력모드로 전환 */
+			while(strstr((char *)shm_addr,"[ok]")==NULL);
+			sprintf((char *)shm_addr, "[ready]");
+
+		}
+    }
+	if ( shmdt( shm_addr) == -1)
+	{
+	}
+
+    delete_btree(head);                           /* B-tree 삭제 */
+    free(head);
 }
 
- 
